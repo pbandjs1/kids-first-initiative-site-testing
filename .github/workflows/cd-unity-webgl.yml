@@ -1,0 +1,120 @@
+name: cd-unity-webgl
+
+on:
+  push:
+    branches:
+      - CD-pipeline # Change to "main" when integrating
+  workflow_dispatch:
+
+jobs:
+  deploy-webgl:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    env:
+      UNITY_PROJECT_REPO: ${{ vars.UNITY_PROJECT_REPO }}
+      UNITY_PROJECT_REF: ${{ vars.UNITY_PROJECT_REF || 'main' }}
+      HOST_GAME_DIR: public/game
+      ARCHIVE_ROOT: public/archive/game
+
+    steps:
+      - name: Checkout hosting repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Unity project repository (with LFS)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UNITY_PROJECT_REPO }}
+          ref: ${{ env.UNITY_PROJECT_REF }}
+          token: ${{ secrets.UNITY_REPO_TOKEN }}
+          path: unity-project
+          lfs: true
+
+      - name: Ensure Git LFS objects are present
+        run: |
+          git lfs install --local
+          git -C unity-project lfs pull
+
+      - name: Build WebGL with Unity
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: unity-project
+          targetPlatform: WebGL
+          buildsPath: build
+
+      - name: Deploy build into hosting repo and archive previous build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          UNITY_BUILD_ID="$(git -C unity-project rev-parse --short=12 HEAD)"
+          echo "UNITY_BUILD_ID=$UNITY_BUILD_ID" >> "$GITHUB_ENV"
+
+          NEW_BUILD_DIR="build/WebGL"
+          if [ ! -d "$NEW_BUILD_DIR" ]; then
+            NEW_BUILD_DIR="build/WebGL/WebGL"
+          fi
+
+          if [ ! -d "$NEW_BUILD_DIR" ]; then
+            echo "WebGL build output not found."
+            exit 1
+          fi
+
+          mkdir -p "$HOST_GAME_DIR"
+          mkdir -p "$ARCHIVE_ROOT"
+
+          shopt -s dotglob nullglob
+          existing=("$HOST_GAME_DIR"/*)
+
+          if [ ${#existing[@]} -gt 0 ]; then
+            OLD_BUILD_ID=""
+            if [ -f "$HOST_GAME_DIR/_build_id.txt" ]; then
+              OLD_BUILD_ID="$(tr -d '\r\n' < "$HOST_GAME_DIR/_build_id.txt")"
+            fi
+
+            if [ -n "$OLD_BUILD_ID" ]; then
+              ARCHIVE_TARGET="$ARCHIVE_ROOT/$OLD_BUILD_ID"
+              if [ -d "$ARCHIVE_TARGET" ]; then
+                echo "Archive for build $OLD_BUILD_ID already exists; removing deployed copy to avoid duplicates."
+                rm -rf "$HOST_GAME_DIR"/*
+              else
+                mv "$HOST_GAME_DIR" "$ARCHIVE_TARGET"
+                mkdir -p "$HOST_GAME_DIR"
+              fi
+            else
+              ARCHIVE_TARGET="$ARCHIVE_ROOT/pre-id-$(date -u +%Y%m%d-%H%M%S)"
+              mv "$HOST_GAME_DIR" "$ARCHIVE_TARGET"
+              mkdir -p "$HOST_GAME_DIR"
+            fi
+          fi
+
+          cp -R "$NEW_BUILD_DIR"/* "$HOST_GAME_DIR"/
+          printf '%s\n' "$UNITY_BUILD_ID" > "$HOST_GAME_DIR/_build_id.txt"
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > "$HOST_GAME_DIR/_deployed_at_utc.txt"
+
+      - name: Commit and push deployment changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "$HOST_GAME_DIR" "$ARCHIVE_ROOT"
+
+          if git diff --cached --quiet; then
+            echo "No deployment changes to commit."
+            exit 0
+          fi
+
+          git commit -m "deploy(webgl): ${UNITY_BUILD_ID}"
+          git push origin "${GITHUB_REF_NAME}"
