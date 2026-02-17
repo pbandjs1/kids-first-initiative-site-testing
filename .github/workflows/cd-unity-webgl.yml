@@ -37,7 +37,7 @@ jobs:
       - name: Ensure Git LFS objects are present
         run: |
           git lfs install --local
-          git -C lfs pull
+          git lfs pull
 
       - name: Build WebGL with Unity
         uses: game-ci/unity-builder@v4
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          UNITY_BUILD_ID="$(git -C rev-parse --short=12 HEAD)"
+          UNITY_BUILD_ID="$(git rev-parse --short=12 HEAD)"
           echo "UNITY_BUILD_ID=$UNITY_BUILD_ID" >> "$GITHUB_ENV"
 
           NEW_BUILD_DIR="build/WebGL"
