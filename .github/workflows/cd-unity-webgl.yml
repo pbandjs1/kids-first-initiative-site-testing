@@ -32,7 +32,6 @@ jobs:
           repository: ${{ env.UNITY_PROJECT_REPO }}
           ref: ${{ env.UNITY_PROJECT_REF }}
           token: ${{ secrets.UNITY_REPO_TOKEN }}
-          path: unity-project
           lfs: true
 
       - name: Ensure Git LFS objects are present
@@ -47,7 +46,6 @@ jobs:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
-          projectPath: unity-project
           targetPlatform: WebGL
           buildsPath: build
 
