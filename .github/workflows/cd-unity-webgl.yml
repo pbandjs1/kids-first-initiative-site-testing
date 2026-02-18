@@ -115,4 +115,4 @@ jobs:
           fi
 
           git commit -m "deploy(webgl): ${UNITY_BUILD_ID}"
-          git push origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
